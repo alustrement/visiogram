@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground: a video camera, kept inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Scaled up and recentered: the glyph's center is at x=57 in the paths below. -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="1.15"
+        android:scaleY="1.15"
+        android:translateX="-3.45">
+        <!-- Camera body with a lens cut out (even-odd fill). -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M38,40h26a6,6 0,0 1,6 6v16a6,6 0,0 1,-6 6h-26a6,6 0,0 1,-6 -6v-16a6,6 0,0 1,6 -6z M51,47a7,7 0,1 0,0.01 0z" />
+        <!-- Viewfinder side. -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M72,50.5l7.2,-4.8a1.8,1.8 0,0 1,2.8 1.5v13.6a1.8,1.8 0,0 1,-2.8 1.5l-7.2,-4.8z" />
+    </group>
+</vector>

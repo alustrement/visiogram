@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Visiogram" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:colorBackground">@color/background</item>
+    </style>
+
+    <color name="background">#FF10141A</color>
+    <color name="brand">#FF2AABEE</color>
+</resources>

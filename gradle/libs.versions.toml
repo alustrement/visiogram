@@ -1,0 +1,30 @@
+[versions]
+agp = "9.1.0"
+kotlin = "2.4.0"
+composeBom = "2026.09.00"
+tvMaterial = "1.1.0"
+activityCompose = "1.13.0"
+lifecycle = "2.11.0"
+coreKtx = "1.19.1"
+tdlCoroutines = "16.0.0"
+ntgcalls = "3.0.5"
+zxing = "3.5.3"
+
+[libraries]
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-foundation = { module = "androidx.compose.foundation:foundation" }
+compose-material-icons = { module = "androidx.compose.material:material-icons-extended" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+tv-material = { module = "androidx.tv:tv-material", version.ref = "tvMaterial" }
+tdl-coroutines = { module = "dev.g000sha256:tdl-coroutines", version.ref = "tdlCoroutines" }
+ntgcalls = { module = "io.github.pytgcalls:ntgcalls", version.ref = "ntgcalls" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
