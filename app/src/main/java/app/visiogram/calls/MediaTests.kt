@@ -13,7 +13,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.webrtc.Camera2Enumerator
 import kotlin.concurrent.thread
+import java.util.Random
 import kotlin.math.PI
+import kotlin.math.log10
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -39,11 +41,14 @@ fun listCameras(context: Context): List<CameraInfo> {
     }
 }
 
-enum class MicTestPhase { IDLE, RECORDING, PLAYING }
+enum class MicTestPhase { IDLE, RECORDING, PLAYING, ECHO }
 
 /**
  * "Record a few seconds, then play back" check on top of [MicSource], so the meter and the recording
  * include the microphone volume setting, exactly as sent in a call.
+ *
+ * Also the echo check: speech-like sound played through [SpeakerSink] as in a call, while the microphone goes
+ * through the [EchoCanceller]; the result says how much of the TV's sound would still reach the other side.
  */
 class MicTest {
     val level: StateFlow<Float> = MicSource.level
@@ -55,6 +60,9 @@ class MicTest {
     private val recording = ShortArray(SAMPLE_RATE * RECORD_SECONDS)
     @Volatile private var recorded = 0
 
+    private val _echoResult = MutableStateFlow<String?>(null)
+    val echoResult: StateFlow<String?> = _echoResult.asStateFlow()
+
     fun start() = MicSource.start(this) { samples, _ -> onSamples(samples) }
 
     fun stop() = MicSource.stop(this)
@@ -64,6 +72,61 @@ class MicTest {
         recorded = 0
         _phase.value = MicTestPhase.RECORDING
     }
+
+    fun testEcho() {
+        if (_phase.value != MicTestPhase.IDLE) return
+        _phase.value = MicTestPhase.ECHO
+        _echoResult.value = null
+        thread(name = "echo-test") {
+            _echoResult.value = runCatching { runEchoTest() }.getOrElse { "Test impossible : ${it.message}" }
+            _phase.value = MicTestPhase.IDLE
+        }
+    }
+
+    /**
+     * One second of room noise, then [ECHO_TEST_SECONDS] of sound. Over the last seconds, once the canceller
+     * has converged, the microphone is compared with the room noise before and after processing: how loud the
+     * TV comes back into the microphone, and how much of it is left.
+     */
+    private fun runEchoTest(): String {
+        SpeakerSink.start(this)
+        try {
+            if (EchoCanceller.stats() == null) return "Annulation d'écho indisponible"
+            Thread.sleep(300)
+            EchoCanceller.resetLevels()
+            Thread.sleep(1000)
+            val room = EchoCanceller.levels()
+
+            val blocks = ECHO_TEST_SECONDS * 100
+            val measureFrom = blocks - 300
+            val sound = SpeechLikeNoise()
+            val started = System.nanoTime()
+            for (block in 0 until blocks) {
+                if (block == measureFrom) {
+                    EchoCanceller.resetLevels()
+                    // Starts the canceller's own one-second statistics windows, read at the end.
+                    EchoCanceller.stats()
+                }
+                SpeakerSink.pushSamples(sound.next(block))
+                // Paced in real time: SpeakerSink keeps only a few blocks ahead.
+                val due = started + (block + 1) * 10_000_000L
+                val wait = (due - System.nanoTime()) / 1_000_000
+                if (wait > 0) Thread.sleep(wait)
+            }
+            val echo = EchoCanceller.levels()
+            val delay = EchoCanceller.stats()?.delayMs?.takeUnless { it.isNaN() }
+            val echoBefore = db(echo.before, room.before)
+            val echoAfter = db(echo.after, room.after)
+            return buildString {
+                append("Écho %+.0f dB au-dessus du bruit de la pièce sans traitement, %+.0f dB avec".format(echoBefore, echoAfter))
+                if (delay != null) append(" · délai %.0f ms".format(delay))
+            }
+        } finally {
+            SpeakerSink.stop(this)
+        }
+    }
+
+    private fun db(power: Double, reference: Double) = 10 * log10(power.coerceAtLeast(1.0) / reference.coerceAtLeast(1.0))
 
     private fun onSamples(samples: ShortArray) {
         if (_phase.value != MicTestPhase.RECORDING) return
@@ -81,6 +144,26 @@ class MicTest {
 
     companion object {
         const val RECORD_SECONDS = 5
+        const val ECHO_TEST_SECONDS = 8
+    }
+}
+
+/**
+ * Noise shaped like speech for the echo check: weighted towards low frequencies, in syllable-like bursts
+ * (about 4 per second) with a short pause every 5.
+ */
+private class SpeechLikeNoise {
+    private val random = Random(1)
+    private var lowPass = 0.0
+
+    fun next(block: Int): ShortArray {
+        val voiced = (block / 25) % 5 != 4
+        return ShortArray(SpeakerSink.CHUNK_SAMPLES) { i ->
+            val t = (block * SpeakerSink.CHUNK_SAMPLES + i).toDouble() / SAMPLE_RATE
+            lowPass += 0.15 * (random.nextGaussian() - lowPass)
+            val envelope = if (voiced) 0.5 + 0.5 * sin(2 * PI * 4 * t) else 0.0
+            (lowPass * envelope * Short.MAX_VALUE).toInt().coerceIn(-Short.MAX_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
     }
 }
 

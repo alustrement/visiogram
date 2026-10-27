@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.SurroundSound
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
@@ -70,26 +72,38 @@ fun SettingsTab(onLogOut: () -> Unit) {
     val cameraId by CallSettings.cameraId.collectAsState()
     val camera = cameras.firstOrNull { it.id == cameraId } ?: cameras.firstOrNull()
 
+    // Shared by the microphone tests on the right and the echo check on the left.
+    val micTest = remember { MicTest() }
+    if (active) {
+        DisposableEffect(micTest) {
+            micTest.start()
+            onDispose { micTest.stop() }
+        }
+    }
+
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(40.dp)) {
-        Box(
-            Modifier
-                .weight(1f)
-                .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color.Black),
-            contentAlignment = Alignment.Center,
-        ) {
-            when {
-                camera == null -> Text("Aucune caméra détectée. Branchez une webcam USB.", color = Color.White)
-                !active -> Text("Aperçu en pause", color = Color.White.copy(alpha = 0.7f))
-                else -> CameraTest()
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    camera == null -> Text("Aucune caméra détectée. Branchez une webcam USB.", color = Color.White)
+                    !active -> Text("Aperçu en pause", color = Color.White.copy(alpha = 0.7f))
+                    else -> CameraTest()
+                }
             }
+            EchoTest(micTest, active)
+            LogOutButton(onLogOut)
         }
 
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             MediaControls(inCall = false)
-            AudioTests(active)
-            LogOutButton(onLogOut)
+            AudioTests(micTest, active)
         }
     }
 }
@@ -165,16 +179,9 @@ private fun CameraTest() {
 
 /** Microphone device and level, "record then play back", and the speaker test tone. */
 @Composable
-private fun AudioTests(active: Boolean) {
+private fun AudioTests(test: MicTest, active: Boolean) {
     val scope = rememberCoroutineScope()
     var playingTone by remember { mutableStateOf(false) }
-    val test = remember { MicTest() }
-    if (active) {
-        DisposableEffect(test) {
-            test.start()
-            onDispose { test.stop() }
-        }
-    }
     val level by MicSource.level.collectAsState()
     val device by MicSource.device.collectAsState()
     val phase by test.phase.collectAsState()
@@ -196,6 +203,7 @@ private fun AudioTests(active: Boolean) {
                     MicTestPhase.IDLE -> "Enregistrer ${MicTest.RECORD_SECONDS} s"
                     MicTestPhase.RECORDING -> "Parlez…"
                     MicTestPhase.PLAYING -> "Lecture…"
+                    MicTestPhase.ECHO -> "Enregistrer ${MicTest.RECORD_SECONDS} s"
                 },
             )
         }
@@ -213,5 +221,24 @@ private fun AudioTests(active: Boolean) {
             Spacer(Modifier.width(8.dp))
             Text(if (playingTone) "Lecture…" else "Son de test")
         }
+    }
+}
+
+/** Echo check: the TV plays speech-like sound for a few seconds, then the result of the echo canceller shows. */
+@Composable
+private fun EchoTest(test: MicTest, active: Boolean) {
+    val phase by test.phase.collectAsState()
+    val result by test.echoResult.collectAsState()
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = test::testEcho, enabled = active && phase == MicTestPhase.IDLE) {
+            Icon(Icons.Filled.SurroundSound, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (phase == MicTestPhase.ECHO) "Test en cours…" else "Tester l'écho")
+        }
+        Text(
+            result ?: "Joue un son sur la télé et mesure l'écho qui reviendrait dans le micro.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

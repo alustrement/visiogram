@@ -93,6 +93,8 @@ object MicSource {
             }
             if (filled < CHUNK_SAMPLES) continue
 
+            // On the raw signal: the echo canceller models the room, not the volume setting.
+            EchoCanceller.capture(samples)
             val peak = applyGain(samples, 10.0.pow(CallSettings.micGain.value / 20.0))
             _level.value = ((20 * log10(max(peak, 1) / 32768.0) + 60) / 60).toFloat().coerceIn(0f, 1f)
             for (i in 0 until CHUNK_SAMPLES) {
