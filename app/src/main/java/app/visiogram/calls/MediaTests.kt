@@ -44,6 +44,12 @@ fun listCameras(context: Context): List<CameraInfo> {
 enum class MicTestPhase { IDLE, RECORDING, PLAYING, ECHO }
 
 /**
+ * Outcome of the echo check: how far above the room noise the TV's sound reached the microphone, before and
+ * after processing, and the echo delay found by the canceller.
+ */
+data class EchoResult(val beforeDb: Double, val afterDb: Double, val delayMs: Double?)
+
+/**
  * "Record a few seconds, then play back" check on top of [MicSource], so the meter and the recording
  * include the microphone volume setting, exactly as sent in a call.
  *
@@ -60,8 +66,9 @@ class MicTest {
     private val recording = ShortArray(SAMPLE_RATE * RECORD_SECONDS)
     @Volatile private var recorded = 0
 
-    private val _echoResult = MutableStateFlow<String?>(null)
-    val echoResult: StateFlow<String?> = _echoResult.asStateFlow()
+    private val _echoResult = MutableStateFlow<Result<EchoResult>?>(null)
+    /** Last echo check, null while one runs. */
+    val echoResult: StateFlow<Result<EchoResult>?> = _echoResult.asStateFlow()
 
     fun start() = MicSource.start(this) { samples, _ -> onSamples(samples) }
 
@@ -78,7 +85,7 @@ class MicTest {
         _phase.value = MicTestPhase.ECHO
         _echoResult.value = null
         thread(name = "echo-test") {
-            _echoResult.value = runCatching { runEchoTest() }.getOrElse { "Test impossible : ${it.message}" }
+            _echoResult.value = runCatching { runEchoTest() }
             _phase.value = MicTestPhase.IDLE
         }
     }
@@ -88,10 +95,10 @@ class MicTest {
      * has converged, the microphone is compared with the room noise before and after processing: how loud the
      * TV comes back into the microphone, and how much of it is left.
      */
-    private fun runEchoTest(): String {
+    private fun runEchoTest(): EchoResult {
         SpeakerSink.start(this)
         try {
-            if (EchoCanceller.stats() == null) return "Annulation d'écho indisponible"
+            checkNotNull(EchoCanceller.stats()) { "l'annulation d'écho n'a pas pu démarrer" }
             Thread.sleep(300)
             EchoCanceller.resetLevels()
             Thread.sleep(1000)
@@ -115,12 +122,7 @@ class MicTest {
             }
             val echo = EchoCanceller.levels()
             val delay = EchoCanceller.stats()?.delayMs?.takeUnless { it.isNaN() }
-            val echoBefore = db(echo.before, room.before)
-            val echoAfter = db(echo.after, room.after)
-            return buildString {
-                append("Écho %+.0f dB au-dessus du bruit de la pièce sans traitement, %+.0f dB avec".format(echoBefore, echoAfter))
-                if (delay != null) append(" · délai %.0f ms".format(delay))
-            }
+            return EchoResult(db(echo.before, room.before), db(echo.after, room.after), delay)
         } finally {
             SpeakerSink.stop(this)
         }
@@ -144,7 +146,8 @@ class MicTest {
 
     companion object {
         const val RECORD_SECONDS = 5
-        const val ECHO_TEST_SECONDS = 8
+        // Long enough for the canceller to converge before the last 3 seconds, which are measured.
+        const val ECHO_TEST_SECONDS = 12
     }
 }
 
@@ -214,15 +217,21 @@ private fun playPcm(pcm: ShortArray): String? {
 }
 
 internal fun AudioDeviceInfo.label(): String {
-    val kind = when (type) {
+    val kind: String? = when (type) {
         AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC -> "HDMI"
         AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB"
         AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
         AudioDeviceInfo.TYPE_BUILTIN_MIC -> "intégré"
         AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "casque filaire"
         AudioDeviceInfo.TYPE_REMOTE_SUBMIX -> "sous-mixage"
+        // The Shield's internal audio bus, which leads to HDMI: its product name says enough.
+        AudioDeviceInfo.TYPE_BUS -> null
         else -> "type $type"
     }
     val name = productName?.toString().orEmpty()
-    return if (name.isBlank()) kind else "$name ($kind)"
+    return when {
+        name.isBlank() -> kind ?: "sortie audio"
+        kind == null -> name
+        else -> "$name ($kind)"
+    }
 }

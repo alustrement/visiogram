@@ -106,7 +106,7 @@ fun HomeScreen(telegram: Telegram, calls: CallManager, groupCalls: GroupCallMana
         when (tab) {
             0 -> GroupsTab(telegram, groupCalls, autoFocus, onAutoFocused)
             1 -> ContactsTab(telegram, calls, autoFocus, onAutoFocused)
-            else -> SettingsTab(onLogOut = { scope.launch { telegram.logOut() } })
+            else -> SettingsTab(navBarFocus = selectedTabFocus, onLogOut = { scope.launch { telegram.logOut() } })
         }
     }
 }

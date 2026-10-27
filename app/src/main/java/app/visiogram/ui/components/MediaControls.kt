@@ -68,7 +68,8 @@ private const val AV_SYNC_STEP = 40
  * [inCall] hides what would interrupt a call (camera and quality reopen the camera) and shows the
  * microphone level instead, which the Settings tab displays with its own tests, and the picture delay,
  * which only means something during a call.
- * [firstFocus] is attached to the first control, for the in-call panel to focus it when it opens.
+ * [firstFocus] is attached to the first control: the in-call panel focuses it when it opens, and the Settings
+ * tab enters its values column there.
  */
 @Composable
 fun MediaControls(inCall: Boolean, modifier: Modifier = Modifier, firstFocus: FocusRequester? = null) {
@@ -81,13 +82,14 @@ fun MediaControls(inCall: Boolean, modifier: Modifier = Modifier, firstFocus: Fo
     val zoom by CallSettings.zoom.collectAsState()
     val gain by CallSettings.micGain.collectAsState()
     val camera = cameras.firstOrNull { it.id == cameraId } ?: cameras.firstOrNull()
+    val firstModifier = if (firstFocus != null) Modifier.focusRequester(firstFocus) else Modifier
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (!inCall) {
             if (cameras.size > 1) {
                 SettingRow(Icons.Filled.Videocam, "Caméra") {
-                    cameras.forEach { info ->
-                        Chip(info.label, selected = info.id == camera?.id) {
+                    cameras.forEachIndexed { index, info ->
+                        Chip(info.label, selected = info.id == camera?.id, modifier = if (index == 0) firstModifier else Modifier) {
                             CallSettings.setCameraId(info.id)
                             CameraSource.reconfigure()
                         }
@@ -95,8 +97,9 @@ fun MediaControls(inCall: Boolean, modifier: Modifier = Modifier, firstFocus: Fo
                 }
             }
             SettingRow(Icons.Filled.Hd, "Qualité") {
-                VideoQuality.entries.forEach { q ->
-                    Chip(q.label, selected = q == quality) {
+                VideoQuality.entries.forEachIndexed { index, q ->
+                    val first = index == 0 && cameras.size <= 1
+                    Chip(q.label, selected = q == quality, modifier = if (first) firstModifier else Modifier) {
                         CallSettings.setQuality(q)
                         CameraSource.reconfigure()
                     }
@@ -107,7 +110,7 @@ fun MediaControls(inCall: Boolean, modifier: Modifier = Modifier, firstFocus: Fo
             Icons.Filled.Brightness6, "Luminosité", signed(brightness),
             onMinus = { CallSettings.setExposure(brightness - BRIGHTNESS_STEP); CameraSource.applyControls() },
             onPlus = { CallSettings.setExposure(brightness + BRIGHTNESS_STEP); CameraSource.applyControls() },
-            minusModifier = if (firstFocus != null) Modifier.focusRequester(firstFocus) else Modifier,
+            minusModifier = if (inCall) firstModifier else Modifier,
         )
         Stepper(
             Icons.Filled.Contrast, "Contraste", signed(contrast),
@@ -218,8 +221,8 @@ private fun SmallIconButton(icon: ImageVector, description: String, modifier: Mo
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
-    FilterChip(selected = selected, onClick = onClick) { Text(label, maxLines = 1, softWrap = false) }
+private fun Chip(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    FilterChip(selected = selected, onClick = onClick, modifier = modifier) { Text(label, maxLines = 1, softWrap = false) }
 }
 
 private fun signed(value: Float): String = when {

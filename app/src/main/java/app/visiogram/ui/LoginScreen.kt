@@ -65,7 +65,7 @@ fun LoginScreen(state: AuthorizationState, telegram: Telegram) {
             Text("Visiogram", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(12.dp))
             Text(
-                "Telegram sur votre télévision, avec les appels audio et vidéo.",
+                "Telegram sur votre appareil, avec les appels audio et vidéo.",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
