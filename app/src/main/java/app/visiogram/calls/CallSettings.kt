@@ -12,7 +12,10 @@ enum class VideoQuality(val label: String, val width: Int, val height: Int) {
     FHD("1080p", 1920, 1080),
 }
 
-/** User choices applied to every call: camera, resolution, brightness, contrast, framing (zoom and position) and microphone volume. */
+/**
+ * User choices applied to every call: camera, resolution, brightness, contrast, framing (zoom and position),
+ * microphone volume and sound/picture synchronisation.
+ */
 object CallSettings {
     private const val KEY_CAMERA = "camera_id"
     private const val KEY_QUALITY = "video_quality"
@@ -22,12 +25,14 @@ object CallSettings {
     private const val KEY_MIC_GAIN = "mic_gain_db"
     private const val KEY_PAN_X = "pan_x"
     private const val KEY_PAN_Y = "pan_y"
+    private const val KEY_AV_SYNC = "av_sync_ms"
 
     val exposureRange = -8f..8f
     val contrastRange = -8f..8f
     val zoomRange = 1f..3f
     val micGainRange = -12f..24f
     val panRange = -1f..1f
+    val avSyncRange = -200..600
 
     private lateinit var prefs: SharedPreferences
 
@@ -65,6 +70,13 @@ object CallSettings {
     /** Centered digital zoom, applied by the camera through its crop region. */
     val zoom: StateFlow<Float> = _zoom.asStateFlow()
 
+    private val _avSyncMs = MutableStateFlow(0)
+    /**
+     * Extra delay given to the remote picture, in milliseconds, on top of the measured audio latency:
+     * positive when the sound still comes after the picture (a Bluetooth headset on the other side, say).
+     */
+    val avSyncMs: StateFlow<Int> = _avSyncMs.asStateFlow()
+
     fun init(context: Context) {
         prefs = context.getSharedPreferences("call_settings", Context.MODE_PRIVATE)
         _cameraId.value = prefs.getString(KEY_CAMERA, null)
@@ -77,6 +89,7 @@ object CallSettings {
         _micGain.value = prefs.getFloat(KEY_MIC_GAIN, 0f).coerceIn(micGainRange)
         _panX.value = prefs.getFloat(KEY_PAN_X, 0f).coerceIn(panRange)
         _panY.value = prefs.getFloat(KEY_PAN_Y, 0f).coerceIn(panRange)
+        _avSyncMs.value = prefs.getInt(KEY_AV_SYNC, 0).coerceIn(avSyncRange)
     }
 
     fun setCameraId(id: String) {
@@ -113,5 +126,10 @@ object CallSettings {
         _panX.value = x.coerceIn(panRange)
         _panY.value = y.coerceIn(panRange)
         prefs.edit().putFloat(KEY_PAN_X, _panX.value).putFloat(KEY_PAN_Y, _panY.value).apply()
+    }
+
+    fun setAvSync(ms: Int) {
+        _avSyncMs.value = ms.coerceIn(avSyncRange)
+        prefs.edit().putInt(KEY_AV_SYNC, _avSyncMs.value).apply()
     }
 }

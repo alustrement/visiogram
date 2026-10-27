@@ -64,13 +64,11 @@ object Media {
 
     /**
      * In PLAYBACK mode ntgcalls reads the slots as remote devices: incoming audio is only negotiated when the
-     * microphone slot is set (here played on the speaker), and incoming video only when the camera or screen slot
-     * is an external sink, whose frames then arrive through onFrames. The speaker slot is ignored.
+     * microphone slot is set, and incoming video only when the camera or screen slot is set. All are external
+     * sinks, delivered through onFrames: the sound goes to [SpeakerSink], the picture through a [VideoDelay].
      */
     fun playbackDescription(): MediaDescription {
-        val remoteAudio = devices.speaker.firstOrNull()?.let {
-            AudioDescription(MediaSource.DEVICE, 48000, 2, it.metadata, false)
-        }
+        val remoteAudio = AudioDescription(MediaSource.EXTERNAL, SpeakerSink.SAMPLE_RATE, 1, "", false)
         // Size and frame rate are unknown before the first frame; ntgcalls takes -1/-1/0 as "as received".
         val remoteVideo = VideoDescription(MediaSource.EXTERNAL, -1, -1, 0, "", false)
         return MediaDescription(remoteAudio, null, remoteVideo, remoteVideo)

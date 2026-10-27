@@ -78,6 +78,7 @@ class CallManager(
 ) {
     private val tdl get() = telegram.client
     private val ntg = NTgCalls()
+    private val videoDelay = VideoDelay("call-video")
 
     /** Set by the app: true while a group video chat is running, so incoming private calls get a busy reply. */
     var isOtherCallActive: () -> Boolean = { false }
@@ -132,11 +133,17 @@ class CallManager(
                 else -> Unit
             }
         }
-        // The local preview comes straight from CameraSource; only remote video is rendered from here.
+        // The local preview comes straight from CameraSource; only the remote sound and picture arrive here.
         ntg.onFrames { _, mode, device, frames ->
-            if (mode != StreamMode.PLAYBACK || (device != StreamDevice.CAMERA && device != StreamDevice.SCREEN)) return@onFrames
-            val sink = remoteVideoSink ?: return@onFrames
-            frames.lastOrNull()?.let { I420FrameRenderer.render(it, sink) }
+            if (mode != StreamMode.PLAYBACK) return@onFrames
+            when (device) {
+                StreamDevice.MICROPHONE -> SpeakerSink.push(frames)
+                StreamDevice.CAMERA, StreamDevice.SCREEN -> {
+                    val sink = remoteVideoSink ?: return@onFrames
+                    frames.lastOrNull()?.let { videoDelay.render(it, sink) }
+                }
+                else -> Unit
+            }
         }
 
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -267,6 +274,7 @@ class CallManager(
                 ntg.setStreamSources(call.userId, StreamMode.CAPTURE, Media.captureDescription(call.isVideo))
                 Media.startMicrophone(this@CallManager, ntg, call.userId)
                 if (call.isVideo) Media.startCamera(this@CallManager, ntg, call.userId)
+                SpeakerSink.start(this@CallManager)
                 ntg.setStreamSources(call.userId, StreamMode.PLAYBACK, Media.playbackDescription())
                 ntg.skipExchange(call.userId, ready.encryptionKey, call.isOutgoing)
                 ntg.connectP2p(
@@ -314,6 +322,8 @@ class CallManager(
         ntgMutex.withLock {
             CameraSource.stop(this@CallManager)
             MicSource.stop(this@CallManager)
+            SpeakerSink.stop(this@CallManager)
+            videoDelay.clear()
             ntgCallUserId?.let { userId -> runCatching { ntg.stop(userId) }.onFailure { Log.w(TAG, "stop failed", it) } }
             ntgCallUserId = null
             pendingSignaling.clear()

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.runtime.getValue
@@ -58,13 +59,15 @@ private const val CONTRAST_STEP = 1f
 private const val ZOOM_STEP = 0.25f
 private const val MIC_GAIN_STEP = 3f
 private const val PAN_STEP = 0.2f
+private const val AV_SYNC_STEP = 40
 
 /**
  * Picture and microphone settings, shared by the Settings tab and the in-call settings panel.
  * Every change is applied live to the running capture.
  *
  * [inCall] hides what would interrupt a call (camera and quality reopen the camera) and shows the
- * microphone level instead, which the Settings tab displays with its own tests.
+ * microphone level instead, which the Settings tab displays with its own tests, and the picture delay,
+ * which only means something during a call.
  * [firstFocus] is attached to the first control, for the in-call panel to focus it when it opens.
  */
 @Composable
@@ -125,6 +128,12 @@ fun MediaControls(inCall: Boolean, modifier: Modifier = Modifier, firstFocus: Fo
         if (inCall) {
             val level by MicSource.level.collectAsState()
             MicLevel(level)
+            val avSync by CallSettings.avSyncMs.collectAsState()
+            Stepper(
+                Icons.Filled.Sync, "Synchro image", if (avSync == 0) "auto" else "%+d ms".format(avSync),
+                onMinus = { CallSettings.setAvSync(avSync - AV_SYNC_STEP) },
+                onPlus = { CallSettings.setAvSync(avSync + AV_SYNC_STEP) },
+            )
         }
     }
 }

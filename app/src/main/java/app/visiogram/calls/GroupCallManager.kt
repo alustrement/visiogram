@@ -76,6 +76,7 @@ class GroupCallManager(
 ) {
     private val tdl get() = telegram.client
     private val ntg = NTgCalls()
+    private val videoDelay = VideoDelay("group-call-video")
 
     /** Set by the app: true while a private call is running. */
     var isOtherCallActive: () -> Boolean = { false }
@@ -115,10 +116,15 @@ class GroupCallManager(
         }
         // The local preview comes straight from CameraSource; only remote video is rendered from here.
         ntg.onFrames { _, mode, device, frames ->
-            if (mode != StreamMode.PLAYBACK || (device != StreamDevice.CAMERA && device != StreamDevice.SCREEN)) return@onFrames
-            // One callback can carry frames of several participants: render the latest of each.
-            frames.associateBy { it.ssrc and 0xFFFFFFFFL }.forEach { (ssrc, frame) ->
-                sinks[ssrc]?.let { I420FrameRenderer.render(frame, it) }
+            if (mode != StreamMode.PLAYBACK) return@onFrames
+            when (device) {
+                // One block per speaking participant, mixed by SpeakerSink.
+                StreamDevice.MICROPHONE -> SpeakerSink.push(frames)
+                // One callback can carry frames of several participants: render the latest of each.
+                StreamDevice.CAMERA, StreamDevice.SCREEN -> frames.associateBy { it.ssrc and 0xFFFFFFFFL }.forEach { (ssrc, frame) ->
+                    sinks[ssrc]?.let { videoDelay.render(frame, it) }
+                }
+                else -> Unit
             }
         }
 
@@ -158,6 +164,7 @@ class GroupCallManager(
                 ntg.setStreamSources(chatId, StreamMode.CAPTURE, Media.captureDescription(withVideo))
                 Media.startMicrophone(this@GroupCallManager, ntg, chatId)
                 if (withVideo) Media.startCamera(this@GroupCallManager, ntg, chatId)
+                SpeakerSink.start(this@GroupCallManager)
                 ntg.setStreamSources(chatId, StreamMode.PLAYBACK, Media.playbackDescription())
 
                 val startMuted = groupCall.muteNewParticipants && !groupCall.canBeManaged
@@ -328,6 +335,8 @@ class GroupCallManager(
         if (joined) runCatching { tdl.leaveGroupCall(call.groupCallId) }
         CameraSource.stop(this)
         MicSource.stop(this)
+        SpeakerSink.stop(this)
+        videoDelay.clear()
         ntgChatId?.let { chatId -> runCatching { ntg.stop(chatId) }.onFailure { Log.w(TAG, "stop failed", it) } }
         ntgChatId = null
         connected = false
