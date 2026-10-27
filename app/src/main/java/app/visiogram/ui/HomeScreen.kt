@@ -10,18 +10,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
@@ -30,15 +34,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.Icon
@@ -72,13 +83,48 @@ fun HomeScreen(telegram: Telegram, calls: CallManager, groupCalls: GroupCallMana
         }
     }
 
-    Column(
+    // The grid fills the screen under the top bar, which moves up with the first row so it reads as part of the page
+    // and scrolls away with it. It stays outside the grid so switching tabs does not dispose the focused tab.
+    val gridState = remember(tab) { LazyGridState() }
+    var topBarHeight by remember { mutableIntStateOf(0) }
+    val topBarHidden by remember(gridState) {
+        derivedStateOf {
+            if (gridState.firstVisibleItemIndex == 0) minOf(gridState.firstVisibleItemScrollOffset, topBarHeight) else topBarHeight
+        }
+    }
+    val topBarHeightDp = with(LocalDensity.current) { topBarHeight.toDp() }
+
+    Box(
         Modifier
             .fillMaxSize()
-            .padding(start = 64.dp, end = 64.dp, top = 16.dp, bottom = 28.dp),
+            .padding(horizontal = 64.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TabRow(selectedTabIndex = tab) {
+        val onAutoFocused = { autoFocus = false }
+        val contentPadding = PaddingValues(top = topBarHeightDp + 28.dp, bottom = 12.dp)
+        when (tab) {
+            0 -> GroupsTab(telegram, groupCalls, autoFocus, onAutoFocused, gridState, contentPadding)
+            1 -> ContactsTab(telegram, calls, autoFocus, onAutoFocused, gridState, contentPadding)
+            else -> Box(Modifier.padding(top = topBarHeightDp + 16.dp)) {
+                SettingsTab(onLogOut = { scope.launch { telegram.logOut() } })
+            }
+        }
+
+        Row(
+            Modifier
+                .onSizeChanged { topBarHeight = it.height }
+                .offset { IntOffset(0, -topBarHidden) }
+                .padding(top = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Coming up from any page lands on the selected tab, never on whichever tab is geometrically closest,
+            // and brings the whole bar back into view.
+            TabRow(
+                selectedTabIndex = tab,
+                modifier = Modifier
+                    .focusProperties { onEnter = { selectedTabFocus.requestFocus() } }
+                    .onFocusChanged { if (it.hasFocus && tab < 2) scope.launch { gridState.animateScrollToItem(0) } }
+                    .focusGroup(),
+            ) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = tab == index,
@@ -99,14 +145,6 @@ fun HomeScreen(telegram: Telegram, calls: CallManager, groupCalls: GroupCallMana
                 Spacer(Modifier.width(10.dp))
                 Text(it.displayName, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-        Spacer(Modifier.height(16.dp))
-
-        val onAutoFocused = { autoFocus = false }
-        when (tab) {
-            0 -> GroupsTab(telegram, groupCalls, autoFocus, onAutoFocused)
-            1 -> ContactsTab(telegram, calls, autoFocus, onAutoFocused)
-            else -> SettingsTab(navBarFocus = selectedTabFocus, onLogOut = { scope.launch { telegram.logOut() } })
         }
     }
 }

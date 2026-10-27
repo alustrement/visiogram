@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.runtime.Composable
@@ -37,7 +38,14 @@ import dev.g000sha256.tdl.dto.User
 import kotlinx.coroutines.launch
 
 @Composable
-fun ContactsTab(telegram: Telegram, calls: CallManager, autoFocus: Boolean, onAutoFocused: () -> Unit) {
+fun ContactsTab(
+    telegram: Telegram,
+    calls: CallManager,
+    autoFocus: Boolean,
+    onAutoFocused: () -> Unit,
+    gridState: LazyGridState,
+    contentPadding: PaddingValues,
+) {
     val scope = rememberCoroutineScope()
     var selected by remember { mutableStateOf<User?>(null) }
 
@@ -51,9 +59,9 @@ fun ContactsTab(telegram: Telegram, calls: CallManager, autoFocus: Boolean, onAu
 
     val list = contacts
     when {
-        list == null -> Text("Chargement des contacts…")
-        list.isEmpty() -> Text("Aucun contact. Ajoutez des contacts depuis votre téléphone.")
-        else -> ContactGrid(list, telegram, autoFocus, onAutoFocused, onSelect = { selected = it })
+        list == null -> Text("Chargement des contacts…", Modifier.padding(contentPadding))
+        list.isEmpty() -> Text("Aucun contact. Ajoutez des contacts depuis votre téléphone.", Modifier.padding(contentPadding))
+        else -> ContactGrid(list, telegram, autoFocus, onAutoFocused, gridState, contentPadding, onSelect = { selected = it })
     }
 
     selected?.let { user ->
@@ -73,7 +81,15 @@ fun ContactsTab(telegram: Telegram, calls: CallManager, autoFocus: Boolean, onAu
 }
 
 @Composable
-private fun ContactGrid(contacts: List<User>, telegram: Telegram, autoFocus: Boolean, onAutoFocused: () -> Unit, onSelect: (User) -> Unit) {
+private fun ContactGrid(
+    contacts: List<User>,
+    telegram: Telegram,
+    autoFocus: Boolean,
+    onAutoFocused: () -> Unit,
+    gridState: LazyGridState,
+    contentPadding: PaddingValues,
+    onSelect: (User) -> Unit,
+) {
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         if (autoFocus) {
@@ -86,7 +102,8 @@ private fun ContactGrid(contacts: List<User>, telegram: Telegram, autoFocus: Boo
         columns = GridCells.Adaptive(180.dp),
         horizontalArrangement = Arrangement.spacedBy(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
-        contentPadding = PaddingValues(vertical = 12.dp),
+        state = gridState,
+        contentPadding = contentPadding,
     ) {
         items(contacts, key = { it.id }) { user ->
             Card(

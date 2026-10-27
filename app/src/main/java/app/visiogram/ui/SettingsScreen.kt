@@ -33,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.focusGroup
-import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -70,7 +69,7 @@ import kotlinx.coroutines.withContext
  * Tests only run while this tab is visible and the app is in the foreground; the tab is not composed during a call.
  */
 @Composable
-fun SettingsTab(navBarFocus: FocusRequester, onLogOut: () -> Unit) {
+fun SettingsTab(onLogOut: () -> Unit) {
     val context = LocalContext.current
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val active = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
@@ -89,16 +88,13 @@ fun SettingsTab(navBarFocus: FocusRequester, onLogOut: () -> Unit) {
     }
 
     // Two columns for the D-pad: coming down from the nav bar lands on the first action ("Tester le son"),
-    // the values on the right are entered at their top, and going up from either column returns to the nav bar.
+    // and the values on the right are entered at their top.
     val firstAction = remember { FocusRequester() }
     val firstValue = remember { FocusRequester() }
     Row(
         Modifier
             .fillMaxSize()
-            .focusProperties {
-                onEnter = { firstAction.requestFocus() }
-                onExit = { if (requestedFocusDirection == FocusDirection.Up) navBarFocus.requestFocus() }
-            }
+            .focusProperties { onEnter = { firstAction.requestFocus() } }
             .focusGroup(),
         horizontalArrangement = Arrangement.spacedBy(40.dp),
     ) {

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.runtime.Composable
@@ -42,7 +43,14 @@ private val Chat.isGroup: Boolean
     get() = type is ChatTypeBasicGroup || (type as? ChatTypeSupergroup)?.isChannel == false
 
 @Composable
-fun GroupsTab(telegram: Telegram, groupCalls: GroupCallManager, autoFocus: Boolean, onAutoFocused: () -> Unit) {
+fun GroupsTab(
+    telegram: Telegram,
+    groupCalls: GroupCallManager,
+    autoFocus: Boolean,
+    onAutoFocused: () -> Unit,
+    gridState: LazyGridState,
+    contentPadding: PaddingValues,
+) {
     var selected by remember { mutableStateOf<Chat?>(null) }
     val videoChats by telegram.videoChats.collectAsStateWithLifecycle()
     val isLive = { chat: Chat -> (videoChats[chat.id] ?: chat.videoChat).groupCallId != 0 }
@@ -57,10 +65,13 @@ fun GroupsTab(telegram: Telegram, groupCalls: GroupCallManager, autoFocus: Boole
 
     val list = groups
     when {
-        list == null -> Text("Chargement des groupes…")
-        list.isEmpty() -> Text("Aucun groupe.")
+        list == null -> Text("Chargement des groupes…", Modifier.padding(contentPadding))
+        list.isEmpty() -> Text("Aucun groupe.", Modifier.padding(contentPadding))
         // Groups with a running video chat come first, otherwise Telegram's order (most recent activity).
-        else -> GroupGrid(list.sortedByDescending(isLive), telegram, isLive, autoFocus, onAutoFocused, onSelect = { selected = it })
+        else -> GroupGrid(
+            list.sortedByDescending(isLive), telegram, isLive, autoFocus, onAutoFocused, gridState, contentPadding,
+            onSelect = { selected = it },
+        )
     }
 
     selected?.let { chat ->
@@ -88,6 +99,8 @@ private fun GroupGrid(
     isLive: (Chat) -> Boolean,
     autoFocus: Boolean,
     onAutoFocused: () -> Unit,
+    gridState: LazyGridState,
+    contentPadding: PaddingValues,
     onSelect: (Chat) -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
@@ -102,7 +115,8 @@ private fun GroupGrid(
         columns = GridCells.Adaptive(200.dp),
         horizontalArrangement = Arrangement.spacedBy(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
-        contentPadding = PaddingValues(vertical = 12.dp),
+        state = gridState,
+        contentPadding = contentPadding,
     ) {
         items(groups, key = { it.id }) { chat ->
             Card(
