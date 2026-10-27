@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
@@ -58,6 +61,8 @@ private fun Root(app: VisiogramApp) {
         permissions.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
     }
     KeepScreenOn(call != null || groupCall != null)
+    // Kept here so that the home screen comes back on the same tab after a call.
+    var homeTab by rememberSaveable { mutableIntStateOf(0) }
 
     // The root Surface provides the default content color for every Text below.
     Surface(
@@ -76,7 +81,10 @@ private fun Root(app: VisiogramApp) {
             )
             state == null -> Message("Visiogram", "Connexion à Telegram…")
             state is AuthorizationStateLoggingOut || state is AuthorizationStateClosed -> Message("Visiogram", "Déconnexion…")
-            state is AuthorizationStateReady -> HomeScreen(telegram, app.calls, app.groupCalls, mediaInUse = call != null || groupCall != null)
+            // Not composed under a call screen: its lists would otherwise take the D-pad focus behind the call.
+            state is AuthorizationStateReady -> if (call == null && groupCall == null) {
+                HomeScreen(telegram, app.calls, app.groupCalls, tab = homeTab, onTabChange = { homeTab = it })
+            }
             else -> LoginScreen(state, telegram)
         }
 

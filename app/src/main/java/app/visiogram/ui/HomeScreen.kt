@@ -30,12 +30,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -60,12 +58,19 @@ import kotlinx.coroutines.launch
 private val tabs = listOf("Groupes", "Contacts", "Réglages")
 
 @Composable
-fun HomeScreen(telegram: Telegram, calls: CallManager, groupCalls: GroupCallManager, mediaInUse: Boolean) {
+fun HomeScreen(telegram: Telegram, calls: CallManager, groupCalls: GroupCallManager, tab: Int, onTabChange: (Int) -> Unit) {
     val scope = rememberCoroutineScope()
-    var tab by rememberSaveable { mutableIntStateOf(0) }
     // Only the first list shown at startup grabs the focus; switching tabs must leave it on the tab row.
     var autoFocus by remember { mutableStateOf(true) }
     val me by produceState<User?>(null) { value = runCatching { telegram.client.getMe().getOrThrow() }.getOrNull() }
+    // The settings tab has no list to focus: when the screen comes back on it after a call, focus its tab instead.
+    val selectedTabFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (tab >= 2) {
+            runCatching { selectedTabFocus.requestFocus() }
+            autoFocus = false
+        }
+    }
 
     Column(
         Modifier
@@ -75,7 +80,11 @@ fun HomeScreen(telegram: Telegram, calls: CallManager, groupCalls: GroupCallMana
         Row(verticalAlignment = Alignment.CenterVertically) {
             TabRow(selectedTabIndex = tab) {
                 tabs.forEachIndexed { index, title ->
-                    Tab(selected = tab == index, onFocus = { tab = index }) {
+                    Tab(
+                        selected = tab == index,
+                        onFocus = { onTabChange(index) },
+                        modifier = if (tab == index) Modifier.focusRequester(selectedTabFocus) else Modifier,
+                    ) {
                         Text(
                             title,
                             style = MaterialTheme.typography.titleLarge,
@@ -97,7 +106,7 @@ fun HomeScreen(telegram: Telegram, calls: CallManager, groupCalls: GroupCallMana
         when (tab) {
             0 -> GroupsTab(telegram, groupCalls, autoFocus, onAutoFocused)
             1 -> ContactsTab(telegram, calls, autoFocus, onAutoFocused)
-            else -> SettingsTab(mediaInUse, onLogOut = { scope.launch { telegram.logOut() } })
+            else -> SettingsTab(onLogOut = { scope.launch { telegram.logOut() } })
         }
     }
 }

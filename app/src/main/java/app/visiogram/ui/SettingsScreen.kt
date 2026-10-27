@@ -58,13 +58,13 @@ import kotlinx.coroutines.withContext
 
 /**
  * Camera preview, microphone and speaker checks, and the shared [MediaControls], laid out to fit one TV screen.
- * Tests only run while this tab is visible, the app is in the foreground and no call holds the devices.
+ * Tests only run while this tab is visible and the app is in the foreground; the tab is not composed during a call.
  */
 @Composable
-fun SettingsTab(mediaInUse: Boolean, onLogOut: () -> Unit) {
+fun SettingsTab(onLogOut: () -> Unit) {
     val context = LocalContext.current
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
-    val active = !mediaInUse && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val active = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
 
     val cameras = remember { listCameras(context) }
     val cameraId by CallSettings.cameraId.collectAsState()

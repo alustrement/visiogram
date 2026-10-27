@@ -1,8 +1,10 @@
 package app.visiogram.calls
 
 import android.content.Context
+import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
@@ -91,6 +93,7 @@ class CallManager(
     private val pendingSignaling = ArrayList<ByteArray>()
 
     private var ringtone: Ringtone? = null
+    private var ringback: ToneGenerator? = null
 
     val protocol: CallProtocol by lazy {
         val p = NTgCalls.getProtocol()
@@ -153,6 +156,7 @@ class CallManager(
                 // The pending updateCall usually arrives first; only fill in if it has not.
                 if (_state.value?.callId != result.result.id) {
                     _state.value = CallUiState(result.result.id, userId, userOrNull(userId), isOutgoing = true, isVideo = isVideo, phase = CallPhase.OUTGOING)
+                    startRingback()
                 }
             }
             is TdlResult.Failure -> {
@@ -227,7 +231,7 @@ class CallManager(
                     isVideo = call.isVideo,
                     phase = if (call.isOutgoing) CallPhase.OUTGOING else CallPhase.INCOMING,
                 )
-                if (!call.isOutgoing) startRinging()
+                if (call.isOutgoing) startRingback() else startRinging()
             }
             is CallStateExchangingKeys -> {
                 stopRinging()
@@ -331,9 +335,21 @@ class CallManager(
         }
     }
 
+    /** Ringback tone while the other side has not answered, on the music stream so that it follows the TV volume. */
+    private fun startRingback() {
+        if (ringback != null) return
+        ringback = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 80) }
+            .onFailure { Log.w(TAG, "Ringback tone unavailable", it) }
+            .getOrNull()
+            ?.apply { startTone(ToneGenerator.TONE_SUP_RINGTONE) }
+    }
+
+    /** Stops both the incoming ringtone and the outgoing ringback tone. */
     private fun stopRinging() {
         ringtone?.stop()
         ringtone = null
+        ringback?.release()
+        ringback = null
     }
 
     private suspend fun userOrNull(userId: Long): User? = runCatching { telegram.user(userId) }.getOrNull()
