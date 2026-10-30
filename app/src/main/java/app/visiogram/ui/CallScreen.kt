@@ -2,6 +2,7 @@ package app.visiogram.ui
 
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +42,14 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
@@ -60,8 +70,15 @@ import app.visiogram.ui.components.VideoRenderer
 import app.visiogram.ui.components.displayName
 import app.visiogram.ui.theme.Danger
 import app.visiogram.ui.theme.Success
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
+
+private const val HUD_TIMEOUT_MS = 5_000L
+private val PreviewHeight = 88.dp
 
 @Composable
 fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
@@ -70,10 +87,59 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
     // The remote control's Back key must never silently leave a call.
     BackHandler {}
 
+    // Once connected the HUD fades out after a while; any input brings it back. Input that wakes it is
+    // swallowed, so that it cannot press the (invisible but still focused) button underneath.
+    var hudVisible by remember { mutableStateOf(true) }
+    val inputs = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST) }
+    val autoHide = call.phase == CallPhase.ACTIVE && !showSettings
+    LaunchedEffect(autoHide) {
+        hudVisible = true
+        if (!autoHide) return@LaunchedEffect
+        inputs.onStart { emit(Unit) }.collectLatest {
+            hudVisible = true
+            delay(HUD_TIMEOUT_MS)
+            hudVisible = false
+        }
+    }
+    /** Returns whether the HUD was hidden. */
+    fun wake(): Boolean {
+        val wasHidden = !hudVisible
+        hudVisible = true
+        inputs.tryEmit(Unit)
+        return wasHidden
+    }
+    var swallowedKey by remember { mutableStateOf<Key?>(null) }
+    val hudAlpha by animateFloatAsState(if (hudVisible) 1f else 0f, label = "hud")
+    // The camera preview leaves the controls once they have faded out, for a small one in the corner.
+    val previewInControls by remember { derivedStateOf { hudAlpha > 0f } }
+    // The camera only runs once the call is connected; before that the preview would stay black.
+    val showSelf = call.cameraEnabled && (call.phase == CallPhase.CONNECTING || call.phase == CallPhase.ACTIVE)
+
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .onPreviewKeyEvent { event ->
+                when (event.type) {
+                    KeyEventType.KeyDown -> (wake() || event.key == swallowedKey).also { if (it) swallowedKey = event.key }
+                    KeyEventType.KeyUp -> (event.key == swallowedKey).also { if (it) swallowedKey = null }
+                    else -> false
+                }
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    var swallowing = false
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.type == PointerEventType.Exit) continue
+                        if (wake() && event.type == PointerEventType.Press) swallowing = true
+                        if (swallowing) {
+                            event.changes.forEach { it.consume() }
+                            if (event.changes.none { it.pressed }) swallowing = false
+                        }
+                    }
+                }
+            },
     ) {
         VideoRenderer(
             sinkKey = Unit,
@@ -91,6 +157,7 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .height(260.dp)
+                    .alpha(hudAlpha)
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f)))),
             )
         }
@@ -101,7 +168,12 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
                 .fillMaxSize()
                 .padding(horizontal = 32.dp, vertical = 24.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .alpha(hudAlpha),
+                verticalAlignment = Alignment.Top,
+            ) {
                 if (call.remoteVideoActive) {
                     Column(
                         Modifier
@@ -137,6 +209,8 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
 
             Controls(
                 call = call,
+                showSelf = showSelf,
+                selfVideo = previewInControls,
                 onAccept = { scope.launch { calls.accept() } },
                 onHangUp = { scope.launch { calls.hangUp() } },
                 onToggleMute = { scope.launch { calls.toggleMute() } },
@@ -144,7 +218,25 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
                 onSettings = { showSettings = true },
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
-                    .padding(top = 24.dp, bottom = 8.dp),
+                    .padding(top = 24.dp, bottom = 8.dp)
+                    .alpha(hudAlpha),
+            )
+        }
+
+        if (showSelf && !previewInControls) {
+            val shape = RoundedCornerShape(12.dp)
+            VideoRenderer(
+                sinkKey = Unit,
+                attach = { CameraSource.previewSink = it },
+                detach = { if (CameraSource.previewSink === it) CameraSource.previewSink = null },
+                mirror = true,
+                fill = true,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 32.dp, bottom = 32.dp)
+                    .size(width = PreviewHeight * 16 / 9, height = PreviewHeight)
+                    .clip(shape)
+                    .background(Color.Black, shape),
             )
         }
     }
@@ -176,6 +268,8 @@ private fun statusText(call: CallUiState): String {
 @Composable
 private fun Controls(
     call: CallUiState,
+    showSelf: Boolean,
+    selfVideo: Boolean,
     onAccept: () -> Unit,
     onHangUp: () -> Unit,
     onToggleMute: () -> Unit,
@@ -210,19 +304,19 @@ private fun Controls(
             )
             CallButton(Icons.Filled.Tune, "Réglages", Color.White.copy(alpha = 0.2f), onSettings)
             CallButton(Icons.Filled.CallEnd, "Raccrocher", Danger, onHangUp, Modifier.focusRequester(primaryFocus))
-            // The camera only runs once the call is connected; before that the preview would stay black.
-            if (call.cameraEnabled && (call.phase == CallPhase.CONNECTING || call.phase == CallPhase.ACTIVE)) {
-                SelfPreview()
-            }
+            if (showSelf) SelfPreview(selfVideo)
         }
     }
 }
 
-/** Own camera, as tall as the buttons; OK switches it between that size and a larger one. */
+/**
+ * Own camera, as tall as the buttons; OK switches it between that size and a larger one.
+ * Without [video] it keeps its place and focus while the picture is shown elsewhere.
+ */
 @Composable
-private fun SelfPreview() {
+private fun SelfPreview(video: Boolean) {
     var large by remember { mutableStateOf(false) }
-    val height = if (large) 198.dp else 88.dp
+    val height = if (large) 198.dp else PreviewHeight
     val shape = RoundedCornerShape(12.dp)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
@@ -235,16 +329,18 @@ private fun SelfPreview() {
                 focusedBorder = Border(BorderStroke(4.dp, Color.White), shape = shape),
             ),
         ) {
-            VideoRenderer(
-                sinkKey = Unit,
-                attach = { CameraSource.previewSink = it },
-                detach = { if (CameraSource.previewSink === it) CameraSource.previewSink = null },
-                mirror = true,
-                fill = true,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(shape),
-            )
+            if (video) {
+                VideoRenderer(
+                    sinkKey = Unit,
+                    attach = { CameraSource.previewSink = it },
+                    detach = { if (CameraSource.previewSink === it) CameraSource.previewSink = null },
+                    mirror = true,
+                    fill = true,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(shape),
+                )
+            }
         }
         Spacer(Modifier.height(10.dp))
         Text(if (large) "Réduire" else "Agrandir", style = MaterialTheme.typography.labelLarge, color = Color.White)
