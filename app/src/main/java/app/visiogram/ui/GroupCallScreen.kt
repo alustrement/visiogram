@@ -1,6 +1,7 @@
 package app.visiogram.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -35,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
@@ -54,6 +57,7 @@ import app.visiogram.ui.components.VideoRenderer
 import app.visiogram.ui.theme.Danger
 import app.visiogram.ui.theme.Success
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /** A camera or screen-share tile of one participant. */
@@ -78,18 +82,25 @@ fun GroupCallScreen(call: GroupCallUiState, groupCalls: GroupCallManager, telegr
     val pinnedTile = tiles.firstOrNull { it.key == pinned }
     val shown = if (pinnedTile != null) listOf(pinnedTile) else tiles.take(MAX_TILES)
 
+    // The title and the controls fold away with the HUD, and the tiles take their room.
+    val hud = rememberCallHud(autoHide = call.phase == GroupCallPhase.ACTIVE && !showSettings)
+    val hudFraction = animateFloatAsState(if (hud.visible) 1f else 0f, label = "hud")
+
     Column(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .wakesHud(hud)
             .padding(horizontal = 40.dp, vertical = 28.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(call.title, style = MaterialTheme.typography.headlineSmall, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.width(16.dp))
-            Text(statusText(call), style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.7f))
+        Column(Modifier.collapsible({ hudFraction.value }, towardsTop = true)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(call.title, style = MaterialTheme.typography.headlineSmall, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(16.dp))
+                Text(statusText(call), style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.7f))
+            }
+            Spacer(Modifier.height(16.dp))
         }
-        Spacer(Modifier.height(16.dp))
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (shown.isEmpty()) {
@@ -108,13 +119,32 @@ fun GroupCallScreen(call: GroupCallUiState, groupCalls: GroupCallManager, telegr
         }
 
         if (call.phase != GroupCallPhase.ENDED) {
-            Spacer(Modifier.height(20.dp))
-            Controls(call, groupCalls, onSettings = { showSettings = true }, Modifier.align(Alignment.CenterHorizontally))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .collapsible({ hudFraction.value }, towardsTop = false),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.height(20.dp))
+                Controls(call, groupCalls, onSettings = { showSettings = true })
+            }
         }
     }
 
     if (showSettings && call.phase != GroupCallPhase.ENDED) CallSettingsPanel(onClose = { showSettings = false })
 }
+
+/**
+ * Takes [fraction] of its height and fades by as much, its content sliding out over the top or bottom edge.
+ * At 0 it is still composed, so a focused control inside keeps the focus.
+ */
+private fun Modifier.collapsible(fraction: () -> Float, towardsTop: Boolean) = this
+    .layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints)
+        val height = (placeable.height * fraction()).roundToInt()
+        layout(placeable.width, height) { placeable.place(0, if (towardsTop) height - placeable.height else 0) }
+    }
+    .graphicsLayer { alpha = fraction() }
 
 private fun statusText(call: GroupCallUiState): String = when (call.phase) {
     GroupCallPhase.JOINING -> "Connexion…"

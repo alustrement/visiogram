@@ -42,14 +42,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
@@ -70,14 +62,9 @@ import app.visiogram.ui.components.VideoRenderer
 import app.visiogram.ui.components.displayName
 import app.visiogram.ui.theme.Danger
 import app.visiogram.ui.theme.Success
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 
-private const val HUD_TIMEOUT_MS = 5_000L
 private val PreviewHeight = 88.dp
 
 @Composable
@@ -87,29 +74,8 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
     // The remote control's Back key must never silently leave a call.
     BackHandler {}
 
-    // Once connected the HUD fades out after a while; any input brings it back. Input that wakes it is
-    // swallowed, so that it cannot press the (invisible but still focused) button underneath.
-    var hudVisible by remember { mutableStateOf(true) }
-    val inputs = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST) }
-    val autoHide = call.phase == CallPhase.ACTIVE && !showSettings
-    LaunchedEffect(autoHide) {
-        hudVisible = true
-        if (!autoHide) return@LaunchedEffect
-        inputs.onStart { emit(Unit) }.collectLatest {
-            hudVisible = true
-            delay(HUD_TIMEOUT_MS)
-            hudVisible = false
-        }
-    }
-    /** Returns whether the HUD was hidden. */
-    fun wake(): Boolean {
-        val wasHidden = !hudVisible
-        hudVisible = true
-        inputs.tryEmit(Unit)
-        return wasHidden
-    }
-    var swallowedKey by remember { mutableStateOf<Key?>(null) }
-    val hudAlpha by animateFloatAsState(if (hudVisible) 1f else 0f, label = "hud")
+    val hud = rememberCallHud(autoHide = call.phase == CallPhase.ACTIVE && !showSettings)
+    val hudAlpha by animateFloatAsState(if (hud.visible) 1f else 0f, label = "hud")
     // The camera preview leaves the controls once they have faded out, for a small one in the corner.
     val previewInControls by remember { derivedStateOf { hudAlpha > 0f } }
     // The camera only runs once the call is connected; before that the preview would stay black.
@@ -119,27 +85,7 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
         Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .onPreviewKeyEvent { event ->
-                when (event.type) {
-                    KeyEventType.KeyDown -> (wake() || event.key == swallowedKey).also { if (it) swallowedKey = event.key }
-                    KeyEventType.KeyUp -> (event.key == swallowedKey).also { if (it) swallowedKey = null }
-                    else -> false
-                }
-            }
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    var swallowing = false
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (event.type == PointerEventType.Exit) continue
-                        if (wake() && event.type == PointerEventType.Press) swallowing = true
-                        if (swallowing) {
-                            event.changes.forEach { it.consume() }
-                            if (event.changes.none { it.pressed }) swallowing = false
-                        }
-                    }
-                }
-            },
+            .wakesHud(hud),
     ) {
         VideoRenderer(
             sinkKey = Unit,
