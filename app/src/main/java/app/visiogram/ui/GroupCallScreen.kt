@@ -29,6 +29,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -37,8 +39,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -56,14 +60,17 @@ import app.visiogram.ui.components.PhotoAvatar
 import app.visiogram.ui.components.VideoRenderer
 import app.visiogram.ui.theme.Danger
 import app.visiogram.ui.theme.Success
-import kotlin.math.ceil
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 /** A camera or screen-share tile of one participant. */
-private data class Tile(val key: String, val participant: GroupParticipant, val isScreen: Boolean)
+private data class Tile(val key: String, val participant: GroupParticipant, val isScreen: Boolean) {
+    fun showsOwnCamera(call: GroupCallUiState) = participant.isCurrentUser && !isScreen && call.cameraEnabled
+    val remoteSsrc get() = if (isScreen) participant.screenSsrc else participant.videoSsrc?.takeIf { !participant.videoPaused }
+}
 
 private const val MAX_TILES = 16
+// Until a video's first frame tells its shape.
+private const val DEFAULT_VIDEO_ASPECT = 16f / 9
 
 @Composable
 fun GroupCallScreen(call: GroupCallUiState, groupCalls: GroupCallManager, telegram: Telegram) {
@@ -81,6 +88,8 @@ fun GroupCallScreen(call: GroupCallUiState, groupCalls: GroupCallManager, telegr
     }
     val pinnedTile = tiles.firstOrNull { it.key == pinned }
     val shown = if (pinnedTile != null) listOf(pinnedTile) else tiles.take(MAX_TILES)
+    // Shapes of the videos by tile key, as reported by their renderers: the grid is laid out around them.
+    val videoAspects = remember { mutableStateMapOf<String, Float>() }
 
     // The title and the controls fold away with the HUD, and the tiles take their room.
     val hud = rememberCallHud(autoHide = call.phase == GroupCallPhase.ACTIVE && !showSettings)
@@ -111,7 +120,7 @@ fun GroupCallScreen(call: GroupCallUiState, groupCalls: GroupCallManager, telegr
                     modifier = Modifier.align(Alignment.Center),
                 )
             } else {
-                TileGrid(shown, call, groupCalls, telegram, focusKey, tileFocus, onToggle = { key ->
+                TileGrid(shown, call, groupCalls, telegram, videoAspects, focusKey, tileFocus, onToggle = { key ->
                     pinned = if (pinnedTile?.key == key) null else key
                     focusKey = key
                 })
@@ -152,34 +161,40 @@ private fun statusText(call: GroupCallUiState): String = when (call.phase) {
     GroupCallPhase.ENDED -> call.endReason ?: "Chat vidéo terminé"
 }
 
+/** Tiles keep their video's shape, whole; avatars are square. See [layoutTiles]. */
 @Composable
 private fun TileGrid(
     tiles: List<Tile>,
     call: GroupCallUiState,
     groupCalls: GroupCallManager,
     telegram: Telegram,
+    videoAspects: MutableMap<String, Float>,
     focusKey: String?,
     tileFocus: FocusRequester,
     onToggle: (String) -> Unit,
 ) {
-    val columns = ceil(sqrt(tiles.size.toDouble())).toInt().coerceAtLeast(1)
-    val rows = tiles.chunked(columns)
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        rows.forEach { row ->
-            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                row.forEach { tile ->
+    val aspects = tiles.map { tile ->
+        if (tile.showsOwnCamera(call) || tile.remoteSsrc != null) videoAspects[tile.key] ?: DEFAULT_VIDEO_ASPECT else 1f
+    }
+    Layout(
+        modifier = Modifier.fillMaxSize(),
+        content = {
+            tiles.forEach { tile ->
+                key(tile.key) {
                     ParticipantTile(
                         tile, call, groupCalls, telegram,
                         onClick = { onToggle(tile.key) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxSize()
-                            .then(if (tile.key == focusKey) Modifier.focusRequester(tileFocus) else Modifier),
+                        onAspectRatio = { videoAspects[tile.key] = it },
+                        modifier = if (tile.key == focusKey) Modifier.focusRequester(tileFocus) else Modifier,
                     )
                 }
-                // Keep the last row's tiles the same width as the others.
-                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
+        },
+    ) { measurables, constraints ->
+        val rects = layoutTiles(aspects, constraints.maxWidth, constraints.maxHeight, 12.dp.roundToPx())
+        val placeables = measurables.mapIndexed { i, measurable -> measurable.measure(Constraints.fixed(rects[i].width, rects[i].height)) }
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            placeables.forEachIndexed { i, placeable -> placeable.place(rects[i].left, rects[i].top) }
         }
     }
 }
@@ -191,12 +206,13 @@ private fun ParticipantTile(
     groupCalls: GroupCallManager,
     telegram: Telegram,
     onClick: () -> Unit,
+    onAspectRatio: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val p = tile.participant
     val shape = RoundedCornerShape(16.dp)
-    val remoteSsrc = if (tile.isScreen) p.screenSsrc else p.videoSsrc?.takeIf { !p.videoPaused }
-    val showLocal = p.isCurrentUser && !tile.isScreen && call.cameraEnabled
+    val remoteSsrc = tile.remoteSsrc
+    val showLocal = tile.showsOwnCamera(call)
 
     Surface(
         onClick = onClick,
@@ -213,12 +229,14 @@ private fun ParticipantTile(
                     attach = { CameraSource.previewSink = it },
                     detach = { if (CameraSource.previewSink === it) CameraSource.previewSink = null },
                     mirror = true,
+                    onAspectRatio = onAspectRatio,
                     modifier = Modifier.fillMaxSize(),
                 )
                 remoteSsrc != null -> VideoRenderer(
                     sinkKey = remoteSsrc,
                     attach = { groupCalls.setVideoSink(remoteSsrc, it) },
                     detach = { groupCalls.removeVideoSink(remoteSsrc, it) },
+                    onAspectRatio = onAspectRatio,
                     modifier = Modifier.fillMaxSize(),
                 )
                 else -> PhotoAvatar(p.photo, p.name, p.colorSeed, telegram, 96.dp, Modifier.align(Alignment.Center))

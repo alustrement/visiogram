@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,6 +81,8 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
     val previewInControls by remember { derivedStateOf { hudAlpha > 0f } }
     // The camera only runs once the call is connected; before that the preview would stay black.
     val showSelf = call.cameraEnabled && (call.phase == CallPhase.CONNECTING || call.phase == CallPhase.ACTIVE)
+    // The preview boxes take the camera's shape, so that its picture shows whole.
+    var selfAspect by remember { mutableFloatStateOf(16f / 9) }
 
     Box(
         Modifier
@@ -157,6 +160,8 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
                 call = call,
                 showSelf = showSelf,
                 selfVideo = previewInControls,
+                selfAspect = selfAspect,
+                onSelfAspect = { selfAspect = it },
                 onAccept = { scope.launch { calls.accept() } },
                 onHangUp = { scope.launch { calls.hangUp() } },
                 onToggleMute = { scope.launch { calls.toggleMute() } },
@@ -176,11 +181,11 @@ fun CallScreen(call: CallUiState, calls: CallManager, telegram: Telegram) {
                 attach = { CameraSource.previewSink = it },
                 detach = { if (CameraSource.previewSink === it) CameraSource.previewSink = null },
                 mirror = true,
-                fill = true,
+                onAspectRatio = { selfAspect = it },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 32.dp, bottom = 32.dp)
-                    .size(width = PreviewHeight * 16 / 9, height = PreviewHeight)
+                    .size(width = PreviewHeight * selfAspect, height = PreviewHeight)
                     .clip(shape)
                     .background(Color.Black, shape),
             )
@@ -216,6 +221,8 @@ private fun Controls(
     call: CallUiState,
     showSelf: Boolean,
     selfVideo: Boolean,
+    selfAspect: Float,
+    onSelfAspect: (Float) -> Unit,
     onAccept: () -> Unit,
     onHangUp: () -> Unit,
     onToggleMute: () -> Unit,
@@ -250,24 +257,24 @@ private fun Controls(
             )
             CallButton(Icons.Filled.Tune, "Réglages", Color.White.copy(alpha = 0.2f), onSettings)
             CallButton(Icons.Filled.CallEnd, "Raccrocher", Danger, onHangUp, Modifier.focusRequester(primaryFocus))
-            if (showSelf) SelfPreview(selfVideo)
+            if (showSelf) SelfPreview(selfVideo, selfAspect, onSelfAspect)
         }
     }
 }
 
 /**
- * Own camera, as tall as the buttons; OK switches it between that size and a larger one.
+ * Own camera, as tall as the buttons and of the camera's [aspect]; OK switches it between that size and a larger one.
  * Without [video] it keeps its place and focus while the picture is shown elsewhere.
  */
 @Composable
-private fun SelfPreview(video: Boolean) {
+private fun SelfPreview(video: Boolean, aspect: Float, onAspectRatio: (Float) -> Unit) {
     var large by remember { mutableStateOf(false) }
     val height = if (large) 198.dp else PreviewHeight
     val shape = RoundedCornerShape(12.dp)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
             onClick = { large = !large },
-            modifier = Modifier.size(width = height * 16 / 9, height = height),
+            modifier = Modifier.size(width = height * aspect, height = height),
             shape = ClickableSurfaceDefaults.shape(shape),
             colors = ClickableSurfaceDefaults.colors(containerColor = Color.Black, focusedContainerColor = Color.Black),
             scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
@@ -281,7 +288,7 @@ private fun SelfPreview(video: Boolean) {
                     attach = { CameraSource.previewSink = it },
                     detach = { if (CameraSource.previewSink === it) CameraSource.previewSink = null },
                     mirror = true,
-                    fill = true,
+                    onAspectRatio = onAspectRatio,
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(shape),
